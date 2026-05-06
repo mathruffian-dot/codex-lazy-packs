@@ -568,6 +568,24 @@ Program 'codex.exe' failed to run: Access is denied
 1. 直接用 `mcpvault.cmd` 測 `tools/list`。
 2. 重啟 Codex 後，在對話中測試是否能列出 Obsidian vault。
 
+### 2026-05-07 macOS + Codex Desktop 實測補充
+
+這次 macOS 實測採用主要 vault：
+
+```text
+/Users/<你>/Documents/Secondbrain
+```
+
+新增踩坑：
+
+| 狀況 | 原因 | 解法 |
+|------|------|------|
+| `find "$HOME" -type d -name ".obsidian"` 找不到結果 | Obsidian app 已安裝不代表已建立 vault | 先建立 `~/Documents/Secondbrain`，再讓 Obsidian app 開啟該資料夾 |
+| 電腦上已有 `Obsidian Vault`，又建立了 `Secondbrain` | 舊筆記本與新教學 vault 並存 | 先請使用者指定主要 vault；不要自動搬移、合併或刪除 |
+| 用 Obsidian URI 開啟後仍回到舊 vault | Desktop app 可能保留舊的 open vault 設定 | 檢查 `~/Library/Application Support/obsidian/obsidian.json`，必要時手動把 app 開到 `Secondbrain` |
+| `codex mcp list` 顯示設定存在，但當前對話沒有工具 | MCP 設定寫入後，不會熱載入到已開啟對話 | 完全重啟 Codex Desktop，再開新對話驗證 |
+| 尚未重啟 Codex 但想先確認 MCP server 能跑 | 當前對話還沒有 `mcp__obsidian__` 工具 | 直接執行 `mcpvault` 的 JSON-RPC 測試，例如 `tools/list`、`list_directory`、`write_note`、`read_note` |
+
 ## 常見問題
 
 | 問題 | 解法 |

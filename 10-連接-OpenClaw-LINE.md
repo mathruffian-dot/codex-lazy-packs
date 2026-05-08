@@ -422,6 +422,220 @@ missingProvidersInUse: ["openai"]
 
 看到 `ok` 才代表 OpenClaw 能真正呼叫 OpenAI。
 
+## 連線故障救援流程
+
+這次實測的故障現象是：LINE 已經完成 pairing，也已經設定 Command Owner，但使用者傳訊息時只收到 LINE 官方帳號的預設回覆：
+
+```text
+很抱歉，本帳號無法個別回覆用戶的訊息。
+敬請期待我們下次發送的內容喔
+```
+
+這通常不是 Command Owner 壞掉，而是 LINE 沒有成功把 webhook 事件送到 OpenClaw，或 OpenClaw 收到後模型端無法回覆。
+
+### 四層連線檢查
+
+按這個順序查，不要先亂改設定：
+
+1. LINE endpoint 是否仍指向目前 tunnel。
+2. Cloudflare tunnel 是否還活著。
+3. 本機 `/line/webhook` proxy 是否還在 `127.0.0.1:18790`。
+4. OpenClaw Gateway / LINE channel / OpenAI model 是否可用。
+
+### 1. 查 OpenClaw LINE channel
+
+```powershell
+& "$env:APPDATA\npm\openclaw.cmd" channels status --deep
+```
+
+正常訊號：
+
+```text
+LINE default: enabled, configured, running, mode=webhook
+```
+
+### 2. 查 pairing 狀態
+
+```powershell
+& "$env:APPDATA\npm\openclaw.cmd" pairing list line
+```
+
+如果已經 paired，通常會看到：
+
+```text
+No pending line pairing requests.
+```
+
+### 3. 查 Cloudflare tunnel 是否還在跑
+
+```powershell
+Get-Process cloudflared -ErrorAction SilentlyContinue |
+  Select-Object Id,Path,StartTime
+```
+
+如果沒有任何輸出，代表 quick tunnel 已經停掉。這次故障的第一個根因就是 tunnel 停掉。
+
+### 4. 查本機 proxy 是否還活著
+
+```powershell
+try {
+  Invoke-WebRequest -Uri "http://127.0.0.1:18790/" -UseBasicParsing -TimeoutSec 5 |
+    Select-Object StatusCode,Content
+} catch {
+  if ($_.Exception.Response) { $_.Exception.Response.StatusCode.value__ } else { $_.Exception.Message }
+}
+
+try {
+  Invoke-WebRequest -Uri "http://127.0.0.1:18790/line/webhook" -UseBasicParsing -TimeoutSec 5 |
+    Select-Object StatusCode,Content
+} catch {
+  if ($_.Exception.Response) { $_.Exception.Response.StatusCode.value__ } else { $_.Exception.Message }
+}
+```
+
+正常訊號：
+
+- `/` 回 `404`
+- `/line/webhook` 回 `200 OK`
+
+如果 `/line/webhook` 顯示無法連線，重新啟動 proxy：
+
+```powershell
+Start-Process -FilePath "C:\Program Files\nodejs\node.exe" `
+  -ArgumentList '"C:\path\to\OpenClaw-LINE-Setup-Pack\line-webhook-proxy.mjs"' `
+  -WindowStyle Hidden `
+  -RedirectStandardOutput "C:\Temp\line-webhook-proxy.out.log" `
+  -RedirectStandardError "C:\Temp\line-webhook-proxy.err.log"
+```
+
+### 5. 重新建立 quick tunnel
+
+quick tunnel 每次重開都會換 URL，所以不能只重啟 cloudflared，還要更新 LINE webhook endpoint。
+
+```powershell
+Start-Process -FilePath ".\cloudflared.exe" `
+  -ArgumentList @("tunnel","--url","http://127.0.0.1:18790") `
+  -WindowStyle Hidden `
+  -RedirectStandardOutput ".\cloudflared-line.out.log" `
+  -RedirectStandardError ".\cloudflared-line.err.log"
+```
+
+從 log 取新 URL：
+
+```powershell
+$text = Get-Content ".\cloudflared-line.err.log" -Raw
+[regex]::Match($text, 'https://[a-zA-Z0-9-]+\.trycloudflare\.com').Value
+```
+
+組成新的 endpoint：
+
+```text
+https://xxxxx.trycloudflare.com/line/webhook
+```
+
+### 6. 更新 LINE webhook endpoint
+
+```powershell
+$lineToken = "<LINE_CHANNEL_ACCESS_TOKEN>"
+$endpoint = "https://xxxxx.trycloudflare.com/line/webhook"
+$headers = @{ Authorization = "Bearer $lineToken" }
+$body = @{ endpoint = $endpoint } | ConvertTo-Json -Compress
+
+Invoke-RestMethod `
+  -Method Put `
+  -Uri "https://api.line.me/v2/bot/channel/webhook/endpoint" `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body $body
+
+Invoke-RestMethod `
+  -Method Get `
+  -Uri "https://api.line.me/v2/bot/channel/webhook/endpoint" `
+  -Headers $headers
+```
+
+正常訊號：
+
+```text
+active = True
+```
+
+### 7. 用 LINE 官方 webhook test 驗證
+
+```powershell
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "https://api.line.me/v2/bot/channel/webhook/test" `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body '{}'
+```
+
+正常訊號：
+
+```text
+success    : True
+statusCode : 200
+detail     : 200
+```
+
+這個測試通過，代表 LINE 官方伺服器已經可以打到你的 webhook。
+
+### 8. 查 OpenAI model probe
+
+如果 webhook 已通，但 LINE 還沒有正常回覆，要查模型：
+
+```powershell
+& "$env:APPDATA\npm\openclaw.cmd" models status --probe --probe-provider openai --probe-max-tokens 16
+```
+
+這次第二個根因是 `openai/gpt-5.5` 回報：
+
+```text
+format
+LLM request failed: provider rejected the request schema or tool payload.
+```
+
+修法是先切到穩定模型：
+
+```powershell
+& "$env:APPDATA\npm\openclaw.cmd" models set openai/gpt-4.1-mini
+& "$env:APPDATA\npm\openclaw.cmd" gateway restart
+& "$env:APPDATA\npm\openclaw.cmd" models status --probe --probe-provider openai --probe-max-tokens 16
+```
+
+成功訊號：
+
+```text
+openai/gpt-4.1-mini ... ok
+```
+
+### 9. LINE 官方自動回覆也可能干擾判斷
+
+如果四層檢查都通，但 LINE 仍出現「本帳號無法個別回覆用戶的訊息」，到 LINE Official Account Manager 檢查：
+
+- 關閉 `Auto-response messages`
+- 保留 `Use webhook` 開啟
+- 確認沒有 Greeting / Response mode 把訊息攔截掉
+
+### 10. 快速恢復摘要
+
+最常見的恢復順序：
+
+```powershell
+# 1. 啟動本機 proxy
+.\start-line-webhook-proxy.ps1
+
+# 2. 重開 Cloudflare quick tunnel
+.\cloudflared.exe tunnel --url http://127.0.0.1:18790
+
+# 3. 把新的 trycloudflare URL 更新到 LINE webhook endpoint
+# 4. 跑 LINE webhook test，確認 success=True
+# 5. 跑 OpenClaw model probe，確認 ok
+```
+
+長期穩定建議：不要依賴 quick tunnel。改用 Cloudflare named tunnel、固定網域或 VPS，否則每次重開電腦或 tunnel 中斷，都必須更新 LINE webhook URL。
+
 ## 常用檢查命令
 
 ```powershell
@@ -439,4 +653,3 @@ missingProvidersInUse: ["openai"]
 2. 如果 key 曾經貼出，測試完請到 OpenAI 後台撤銷並重建。
 3. quick tunnel 沒 uptime 保證，只適合測試；長期使用建議改 Cloudflare named tunnel 或固定 VPS。
 4. 建議把 `plugins.allow` pin 到可信外掛，避免非 bundled plugin 自動載入。
-

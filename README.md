@@ -76,6 +76,7 @@
 | 07 | [開始你的專案](07-初始化班級工具工作模式.md) | AGENTS.md + Obsidian 駕駛艙 + GitHub repo + 開工/收工/新專案初始化 skills |
 | 08 | [用 Image Gen Skill 在 Codex 生圖](08-用Image Gen Skill在Codex生圖.md) | 新手用內建 Image Gen Skill；進階再用 API Key / CLI |
 | 09 | [用 chezmoi 同步 Codex 設定](09-用chezmoi同步Codex設定.md) | 跨電腦同步 `~/.codex/AGENTS.md` 與全域 skills |
+| 10 | [連接 OpenClaw 與 LINE](10-連接-OpenClaw-LINE.md) | OpenClaw Gateway、Codex MCP、LINE Messaging API、Command Owner、受限 webhook proxy 與 OpenAI key 實測設定 |
 
 ---
 

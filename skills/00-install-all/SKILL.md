@@ -21,5 +21,6 @@ description: 一次安裝所有 Codex 懶人包技能。說「全部安裝」「
 12. 11-workspace — 專案初始化
 13. 12-draw — 生圖
 14. 13-chezmoi — 同步設定
+15. 14-spreadsheets-report — Excel 月報整合與公式維護
 
-每完成一個報告進度，最終總表：14 項各別狀態。
+每完成一個報告進度，最終總表：15 項各別狀態。

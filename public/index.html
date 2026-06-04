@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex 文字雲</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f2;
+      --ink: #22302d;
+      --muted: #6a756f;
+      --line: #d8ddd5;
+      --accent: #166f63;
+      --accent-strong: #0f5148;
+      --panel: #ffffff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    main {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 24px;
+      align-items: stretch;
+      min-height: calc(100vh - 64px);
+    }
+
+    aside,
+    .cloud-wrap {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    aside {
+      padding: 24px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      line-height: 1.2;
+    }
+
+    p {
+      color: var(--muted);
+      line-height: 1.7;
+      margin: 0 0 20px;
+    }
+
+    form {
+      display: grid;
+      gap: 12px;
+    }
+
+    label {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font: inherit;
+      padding: 12px 14px;
+      color: var(--ink);
+    }
+
+    button {
+      border: 0;
+      border-radius: 8px;
+      background: var(--accent);
+      color: white;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 700;
+      padding: 12px 14px;
+    }
+
+    button:hover {
+      background: var(--accent-strong);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .status {
+      min-height: 24px;
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 14px;
+    }
+
+    .cloud-wrap {
+      display: flex;
+      flex-direction: column;
+      min-height: 520px;
+      padding: 20px;
+    }
+
+    .cloud-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    #cloud {
+      flex: 1;
+      display: flex;
+      flex-wrap: wrap;
+      align-content: center;
+      justify-content: center;
+      gap: 14px 20px;
+      padding: 32px 12px;
+      text-align: center;
+    }
+
+    .word {
+      color: var(--accent-strong);
+      line-height: 1;
+      font-weight: 800;
+      transition: transform 0.2s ease;
+    }
+
+    .word:hover {
+      transform: scale(1.08);
+    }
+
+    .empty {
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    @media (max-width: 820px) {
+      main {
+        width: min(100% - 20px, 560px);
+        padding: 10px 0;
+      }
+
+      .layout {
+        grid-template-columns: 1fr;
+        min-height: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="layout">
+      <aside>
+        <h1>Codex 文字雲</h1>
+        <p>輸入一個關鍵字，送出後會同步到 Firebase Firestore，所有開啟頁面的人會即時看到更新。</p>
+
+        <form id="wordForm">
+          <label for="wordInput">關鍵字，最多 20 字</label>
+          <input id="wordInput" name="word" type="text" maxlength="20" autocomplete="off" placeholder="例如：AI、閱讀、合作">
+          <button id="submitButton" type="submit">送出關鍵字</button>
+        </form>
+
+        <div id="status" class="status">正在連接 Firebase...</div>
+      </aside>
+
+      <section class="cloud-wrap" aria-label="文字雲">
+        <div class="cloud-head">
+          <span id="summary">載入中</span>
+          <span>Firestore 即時同步</span>
+        </div>
+        <div id="cloud">
+          <div class="empty">等待資料中...</div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import {
+      getFirestore,
+      collection,
+      addDoc,
+      serverTimestamp,
+      onSnapshot,
+      query,
+      orderBy,
+      limit
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+    import {
+      getAuth,
+      signInAnonymously
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+
+    const firebaseConfig = {
+      projectId: "codex-0604",
+      appId: "1:60613851623:web:2d094bdb56d7b0a9966542",
+      storageBucket: "codex-0604.firebasestorage.app",
+      apiKey: "AIzaSyC21rhBN6HHOVQFtvmQwhFV6q1AjhtPcrc",
+      authDomain: "codex-0604.firebaseapp.com",
+      messagingSenderId: "60613851623"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+    const wordsRef = collection(db, "wordcloud_words");
+
+    const form = document.querySelector("#wordForm");
+    const input = document.querySelector("#wordInput");
+    const button = document.querySelector("#submitButton");
+    const status = document.querySelector("#status");
+    const cloud = document.querySelector("#cloud");
+    const summary = document.querySelector("#summary");
+
+    let authReady = false;
+
+    signInAnonymously(auth)
+      .then(() => {
+        authReady = true;
+        status.textContent = "Firebase 已連線，可以送出關鍵字。";
+      })
+      .catch((error) => {
+        button.disabled = true;
+        status.textContent = `投稿需要先在 Firebase Console 啟用 Anonymous Auth：${error.code}`;
+      });
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const text = input.value.trim();
+
+      if (!text) {
+        status.textContent = "請先輸入關鍵字。";
+        input.focus();
+        return;
+      }
+
+      if (!authReady) {
+        status.textContent = "Firebase 登入尚未完成，請稍後再試。";
+        return;
+      }
+
+      button.disabled = true;
+      try {
+        await addDoc(wordsRef, {
+          text,
+          createdAt: serverTimestamp()
+        });
+        input.value = "";
+        status.textContent = `已送出：「${text}」`;
+      } catch (error) {
+        status.textContent = `送出失敗：${error.code}`;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    const wordsQuery = query(wordsRef, orderBy("createdAt", "desc"), limit(300));
+
+    onSnapshot(wordsQuery, (snapshot) => {
+      const counts = new Map();
+      snapshot.forEach((doc) => {
+        const text = String(doc.data().text || "").trim();
+        if (!text) return;
+        counts.set(text, (counts.get(text) || 0) + 1);
+      });
+
+      const words = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh-Hant"));
+      summary.textContent = `${snapshot.size} 筆資料，${words.length} 個關鍵字`;
+
+      if (words.length === 0) {
+        cloud.innerHTML = '<div class="empty">還沒有關鍵字，請先送出第一個。</div>';
+        return;
+      }
+
+      const max = Math.max(...words.map(([, count]) => count));
+      cloud.innerHTML = "";
+
+      for (const [text, count] of words) {
+        const item = document.createElement("span");
+        const size = 18 + Math.round((count / max) * 44);
+        item.className = "word";
+        item.textContent = text;
+        item.title = `${text}：${count} 次`;
+        item.style.fontSize = `${size}px`;
+        cloud.appendChild(item);
+      }
+    }, (error) => {
+      summary.textContent = "讀取失敗";
+      cloud.innerHTML = `<div class="empty">Firestore 讀取失敗：${error.code}</div>`;
+    });
+  </script>
+</body>
+</html>

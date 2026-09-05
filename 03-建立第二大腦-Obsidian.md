@@ -1,7 +1,7 @@
 # Codex 懶人包 #03：連接 Obsidian 第二大腦
 
-> 版本：v0.2（Codex 版）
-> 更新日期：2026-04-26
+> 版本：v0.3（Codex 版）
+> 更新日期：2026-05-01
 
 ---
 
@@ -89,7 +89,34 @@ $roots |
 
 如果找到多個候選路徑，請列出來讓使用者選，不要自行猜。
 
-### 1-3. macOS / Linux 自動搜尋候選 vault
+### 1-3. 如果常見位置找不到，讀 Obsidian 記錄
+
+如果使用者明明有開過 Obsidian，但常見位置沒有搜到 `.obsidian`，Windows 可讀 Obsidian 自己的設定檔：
+
+```powershell
+Get-Content -Path "$env:APPDATA\obsidian\obsidian.json" -Raw
+```
+
+常見內容會像：
+
+```json
+{
+  "vaults": {
+    "xxxx": {
+      "path": "G:\\我的雲端硬碟\\2026 Codex\\2ndbrain",
+      "open": true
+    }
+  }
+}
+```
+
+處理原則：
+
+- 優先看 `open: true` 的 vault。
+- 若有多個 vault，列出路徑讓使用者選，不要只憑資料夾名稱猜。
+- 取得候選路徑後，仍要確認該資料夾底下有 `.obsidian`。
+
+### 1-4. macOS / Linux 自動搜尋候選 vault
 
 ```bash
 find "$HOME" -type d -name ".obsidian" -prune 2>/dev/null | sed 's#/.obsidian$##'
@@ -121,7 +148,8 @@ find "$HOME" -type d -name ".obsidian" -prune 2>/dev/null | sed 's#/.obsidian$##
    - Google Drive
    - Obsidian Sync
    - 本機資料夾
-3. 建立資料夾，例如：
+3. 如果使用 Google Drive，先確認使用者要放在「本機同步路徑」的哪一層，不要只看網頁連結。
+4. 建立資料夾，例如：
 
 ```text
 Secondbrain/
@@ -132,11 +160,18 @@ Secondbrain/
 └── Clippings/
 ```
 
-4. 請使用者用 Obsidian 開啟這個資料夾。
-5. 記下 vault 完整路徑 `<VAULT_PATH>`。
+如果使用者要放在既有 Google Drive 資料夾底下，例如 `2026 Codex`，路徑應明確寫完整：
+
+```text
+G:\我的雲端硬碟\2026 Codex\2ndbrain
+```
+
+5. 請使用者用 Obsidian 開啟這個資料夾。
+6. 記下 vault 完整路徑 `<VAULT_PATH>`。
 
 > [!note]
 > 不必強制使用 Google Drive。OneDrive、Obsidian Sync、本機資料夾都可以。重點是 Codex 要知道實際路徑，且要有讀寫權限。
+> Google Drive 網頁連結只能協助確認雲端資料夾；MCP 設定仍要填本機同步路徑，例如 `G:\我的雲端硬碟\2026 Codex\2ndbrain`。
 
 ---
 
@@ -568,6 +603,52 @@ Program 'codex.exe' failed to run: Access is denied
 1. 直接用 `mcpvault.cmd` 測 `tools/list`。
 2. 重啟 Codex 後，在對話中測試是否能列出 Obsidian vault。
 
+### 踩坑 8：常見位置找不到 vault，但 Obsidian 其實有開啟
+
+原因：
+
+vault 可能放在 Google Drive、外接磁碟、或使用者自訂同步資料夾，不一定在 OneDrive / Documents / Desktop。
+
+解法：
+
+讀取 Obsidian 設定檔：
+
+```powershell
+Get-Content -Path "$env:APPDATA\obsidian\obsidian.json" -Raw
+```
+
+從 `vaults` 中找 `open: true` 或最近開啟的 `path`，再用 `Test-Path "<路徑>\.obsidian"` 確認。
+
+### 踩坑 9：Google Drive 網頁連結和本機同步路徑不是同一件事
+
+原因：
+
+Google Drive 網頁連結會顯示雲端資料夾 ID，但 MCPVault 需要的是本機檔案系統路徑。
+
+解法：
+
+先確認雲端資料夾名稱與父資料夾，再對照本機同步路徑。例如使用者要放在 `2026 Codex` 底下，MCP 設定應使用：
+
+```text
+G:\我的雲端硬碟\2026 Codex\2ndbrain
+```
+
+不要只把網頁 URL 當成 vault 路徑。
+
+### 踩坑 10：搬移 vault 後，MCP 還連到舊位置
+
+原因：
+
+`config.toml` 的 `[mcp_servers.obsidian] args` 是固定路徑，不會自動追蹤資料夾搬移。
+
+解法：
+
+1. 先確認新路徑存在且有 `.obsidian`。
+2. 備份 `C:\Users\<使用者>\.codex\config.toml`。
+3. 更新 `[mcp_servers.obsidian] args`。
+4. 用 `mcpvault.cmd` 對新路徑讀回測試筆記。
+5. 完全重啟 Codex。
+
 ## 常見問題
 
 | 問題 | 解法 |
@@ -576,10 +657,12 @@ Program 'codex.exe' failed to run: Access is denied
 | 我有多個 vault | 列出候選路徑，請使用者選主要 vault |
 | 我用 OneDrive 可以嗎 | 可以，路徑正確即可 |
 | 我用 Google Drive 可以嗎 | 可以，路徑正確即可 |
+| Google Drive 連結可以直接填進 MCP 嗎 | 不行，MCP 要填本機同步路徑，不是網頁 URL |
 | 我用 Obsidian Sync 可以嗎 | 可以，MCP 看的是本機資料夾 |
 | 全域 AGENTS.md 寫了還不能改 | AGENTS.md 只提供記憶與規則，不保證檔案權限 |
 | 跨專案要怎麼穩定修改 | 建議使用 MCP，並完成跨專案測試 |
 | Windows TOML 路徑一直失敗 | 確認用 `\\`，例如 `C:\\Users\\...\\Secondbrain` |
+| 我搬了 vault 位置 | 重新更新 `config.toml` 的 MCP 路徑，並重啟 Codex |
 
 ---
 
